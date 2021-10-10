@@ -6,7 +6,8 @@ from PySide6 import QtWidgets as qtw
 class IPv4Validator(qtg.QValidator):
     """Enforce entry of an IPv4 Address"""
 
-    def validate(self, proposed: str, index: int) -> object:
+    def validate(self, proposed: str, index: int) -> qtg.QValidator.State:
+        # sourcery skip: convert-any-to-in
         octets = proposed.split(".")
         if len(octets) > 4 or any(len(x) > 3 for x in octets):
             return qtg.QValidator.Invalid
@@ -19,9 +20,40 @@ class IPv4Validator(qtg.QValidator):
         return qtg.QValidator.Acceptable
 
 
+class ChoiceSpinBox(qtw.QSpinBox):
+    """A spinbox for selecting choices."""
+
+    def __init__(self, choices: list[str], *args, **kwargs) -> None:
+        self.choices = choices
+        super().__init__(*args, maximum=len(self.choices) - 1, minimum=0, **kwargs)
+
+    def valueFromText(self, text: str) -> int:
+        """Overrides QSpinBox. Returns list index of the selected text item."""
+        return self.choices.index(text)
+
+    def textFromValue(self, value: int) -> str:
+        """Overrides QSpinBox. Returns display text for the selected list item."""
+        try:
+            return self.choices[value]
+        except IndexError:
+            return "Error!"
+
+    def validate(self, input: str, pos: int) -> qtg.QValidator.State:
+        if input in self.choices:
+            return qtg.QValidator.Acceptable
+        if any(value.startswith(input) for value in self.choices):
+            return qtg.QValidator.Intermediate
+        return qtg.QValidator.Invalid
+
+
 class MainWindow(qtw.QWidget):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+
+        #####################
+        # Construct Widgets #
+        #####################
+
         label = qtw.QLabel("Hello Label", self)
         line_edit = qtw.QLineEdit(
             "default value",
@@ -82,6 +114,7 @@ class MainWindow(qtw.QWidget):
             ),
         )
         textedit.sizeHint = lambda: qtc.QSize(500, 200)
+        ratingbox = ChoiceSpinBox(choices=["bad", "average", "good", "awesome"])
 
         #################################
         # Placing and arranging Widgets #
@@ -90,6 +123,7 @@ class MainWindow(qtw.QWidget):
         sublayout = qtw.QHBoxLayout()
         sublayout.addWidget(button)
         sublayout.addWidget(combobox)
+        sublayout.addWidget(ratingbox)
         form_layout = qtw.QFormLayout()
         form_layout.addRow("Item 1", qtw.QLineEdit())
         form_layout.addRow("Item 2", qtw.QLineEdit())
