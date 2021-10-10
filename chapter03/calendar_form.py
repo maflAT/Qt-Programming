@@ -1,6 +1,4 @@
-from PySide6 import QtGui as qtg
-from PySide6 import QtCore as qtc
-from PySide6 import QtWidgets as qtw
+from PyQt6 import QtGui as qtg, QtCore as qtc, QtWidgets as qtw
 
 
 class MainWindow(qtw.QWidget):
@@ -15,7 +13,7 @@ class MainWindow(qtw.QWidget):
 
         # Presets:
         EXPANDING = qtw.QSizePolicy(
-            qtw.QSizePolicy.Expanding, qtw.QSizePolicy.Expanding
+            qtw.QSizePolicy.Policy.Expanding, qtw.QSizePolicy.Policy.Expanding
         )
         EVENT_CATEGORIES = [
             "Select category...",
@@ -25,6 +23,7 @@ class MainWindow(qtw.QWidget):
             "Doctor",
             "Family",
         ]
+
         self.calendar = qtw.QCalendarWidget(sizePolicy=EXPANDING)
         self.event_list = qtw.QListWidget(sizePolicy=EXPANDING)
         self.event_title = qtw.QLineEdit()
