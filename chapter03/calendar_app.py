@@ -8,7 +8,7 @@ from PyQt6 import QtGui as qtg, QtCore as qtc, QtWidgets as qtw
 @total_ordering
 class Event:
     title: str
-    time: Optional[qtc.QTime]
+    time: Optional[qtc.QTime]  # Events with time = None will be considered 'All-day'
     category: str
     detail: str = ""
 
@@ -20,6 +20,32 @@ class Event:
                 f"{other.__class__.__qualname__} is not supported."
             )
         return (self.time or qtc.QTime(0, 0)) < (other.time or qtc.QTime(0, 0))
+
+
+class CategoryWindow(qtw.QWidget):
+    """A form for creating new categories."""
+
+    submitted = qtc.pyqtSignal(str)
+
+    def __init__(self, parent):
+        super().__init__(parent=None, modal=True, windowTitle="New category")
+        self.setParent(parent)
+        self.category_entry = qtw.QLineEdit()
+        self.submit_btn = qtw.QPushButton("Submit", clicked=self.onSubmit)
+        self.cancel_btn = qtw.QPushButton("Cancel", clicked=self.close)
+        layout = qtw.QVBoxLayout()
+        layout.addWidget(qtw.QLabel("Please enter a new category name:"))
+        layout.addWidget(self.category_entry)
+        layout.addWidget(self.submit_btn)
+        layout.addWidget(self.cancel_btn)
+        self.setLayout(layout)
+
+    @qtc.pyqtSlot()
+    def onSubmit(self):
+        """Action to execute when the form is submitted."""
+        if self.category_entry.text():
+            self.submitted.emit(self.category_entry.text())
+        self.close()
 
 
 class MainWindow(qtw.QWidget):
@@ -107,6 +133,9 @@ class MainWindow(qtw.QWidget):
         self.del_button.clicked.connect(self.delete_event)
         # set 'Delete' button state based on item selection:
         self.event_list.itemSelectionChanged.connect(self.check_delete_btn)
+        # show category creation dialog on category selection:
+        self.event_category.currentTextChanged.connect(self.on_category_change)
+
         self.check_delete_btn()
 
     def clear_form(self):
@@ -139,6 +168,7 @@ class MainWindow(qtw.QWidget):
             self.allday_check.setChecked(True)
         else:
             self.event_time.setTime(event_data.time)
+        self.event_category.setCurrentText(event_data.category)
         self.event_title.setText(event_data.title)
         self.event_detail.setText(event_data.detail)
 
@@ -173,6 +203,19 @@ class MainWindow(qtw.QWidget):
     def check_delete_btn(self):
         """Disable 'Delete' when no event is selected."""
         self.del_button.setDisabled(self.event_list.currentRow() == -1)
+
+    def add_category(self, category: str):
+        """Add a new category to the list."""
+        self.event_category.addItem(category)
+        self.event_category.setCurrentText(category)
+
+    def on_category_change(self, text: str):
+        """Create new, user defined category."""
+        if text == "New...":
+            self.cat_dialog = CategoryWindow(parent=None)
+            self.cat_dialog.submitted.connect(self.add_category)
+            self.cat_dialog.show()
+            self.event_category.setCurrentIndex(0)
 
 
 def main(*args, **kwargs) -> int:
