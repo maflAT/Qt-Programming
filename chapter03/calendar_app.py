@@ -22,14 +22,13 @@ class Event:
         return (self.time or qtc.QTime(0, 0)) < (other.time or qtc.QTime(0, 0))
 
 
-class CategoryWindow(qtw.QWidget):
+class CategoryWindow(qtw.QDialog):
     """A form for creating new categories."""
 
     submitted = qtc.pyqtSignal(str)
 
     def __init__(self, parent):
-        super().__init__(parent=None, modal=True, windowTitle="New category")
-        self.setParent(parent)
+        super().__init__(parent=parent, modal=True, windowTitle="New category")
         self.category_entry = qtw.QLineEdit()
         self.submit_btn = qtw.QPushButton("Submit", clicked=self.onSubmit)
         self.cancel_btn = qtw.QPushButton("Cancel", clicked=self.close)
@@ -212,9 +211,9 @@ class MainWindow(qtw.QWidget):
     def on_category_change(self, text: str):
         """Create new, user defined category."""
         if text == "New...":
-            self.cat_dialog = CategoryWindow(parent=None)
-            self.cat_dialog.submitted.connect(self.add_category)
-            self.cat_dialog.show()
+            cat_dialog = CategoryWindow(self)
+            cat_dialog.submitted.connect(self.add_category)
+            cat_dialog.show()
             self.event_category.setCurrentIndex(0)
 
 
