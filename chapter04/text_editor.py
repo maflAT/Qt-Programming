@@ -49,6 +49,7 @@ class MainWindow(qtw.QMainWindow):
         redo_action.triggered.connect(self.textedit.redo)
         edit_menu.addAction(redo_action)
         help_menu = menu_bar.addMenu("Help")
+        help_menu.addAction("About", self.showAboutDialog)
 
         ################
         # Add Toolbars #
@@ -109,11 +110,46 @@ class MainWindow(qtw.QMainWindow):
         replace_widget.setLayout(s_r_layout)
         dock.setWidget(replace_widget)
 
+        #################
+        # Message Boxes #
+        #################
+
+        # response = qtw.QMessageBox.question(
+        #     self,
+        #     "My Text Editor",
+        #     "This is beta software, do you want to continue?",
+        #     qtw.QMessageBox.StandardButton.Yes | qtw.QMessageBox.StandardButton.Abort,
+        # )
+
+        splash_screen = qtw.QMessageBox(
+            windowTitle="My Text Editor",
+            text="BETA SOFTWARE WARNING!",
+            informativeText="This is very, very beta, "
+            "are you really sure you want to use it?",
+            detailedText="This editor was written for pedagogical purposes, "
+            "and probably is not fit for real work.",
+            modal=True,
+        )
+        splash_screen.addButton(qtw.QMessageBox.StandardButton.Yes)
+        splash_screen.addButton(qtw.QMessageBox.StandardButton.Abort)
+
+        response = splash_screen.exec()
+        if response == qtw.QMessageBox.StandardButton.Abort:
+            self.close()
+            sys.exit()
+
     def search_and_replace(self):
         s_text = self.search_text_inp.text()
         r_text = self.replace_text_inp.text()
         if s_text:
             self.textedit.setText(self.textedit.toPlainText().replace(s_text, r_text))
+
+    def showAboutDialog(self):
+        qtw.QMessageBox.about(
+            self,
+            "About text_editor.py",
+            "This is a text editor written in PyQt.",
+        )
 
 
 def main(*args, **kwargs) -> int:
