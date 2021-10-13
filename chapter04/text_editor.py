@@ -38,7 +38,9 @@ class MainWindow(qtw.QMainWindow):
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("File")
         open_action = file_menu.addAction("Open")
+        open_action.triggered.connect(self.openFile)
         save_action = file_menu.addAction("Save")
+        save_action.triggered.connect(self.saveFile)
         quit_action = file_menu.addAction("Quit", self.close)
         edit_menu = menu_bar.addMenu("Edit")
         edit_menu.addAction("Undo", self.textedit.undo)
@@ -150,6 +152,37 @@ class MainWindow(qtw.QMainWindow):
             "About text_editor.py",
             "This is a text editor written in PyQt.",
         )
+
+    def openFile(self):
+        filename, _ = qtw.QFileDialog.getOpenFileName(
+            parent=self,
+            caption="Select a text file to open...",
+            # directory=qtc.QDir.homePath(),
+            filter="Text Files (*.txt) ;;Python Files (*.py) ;;All Files (*)",
+            initialFilter="Python Files (*.py)",
+            options=qtw.QFileDialog.Option.DontResolveSymlinks
+            # | qtw.QFileDialog.Option.DontUseNativeDialog,
+        )
+        if filename:
+            try:
+                with open(filename, "r") as fh:
+                    self.textedit.setText(fh.read())
+            except Exception as e:
+                qtw.QMessageBox.critical(f"could not load file: {e}")
+
+    def saveFile(self):
+        filename, _ = qtw.QFileDialog.getSaveFileName(
+            self,
+            "Select the file to save to...",
+            qtc.QDir.homePath(),
+            "Text Files (*.txt) ;;Python Files (*.py) ;; All Files (*)",
+        )
+        if filename:
+            try:
+                with open(filename, "w") as fh:
+                    fh.write(self.textedit.toPlainText())
+            except Exception as e:
+                qtw.QMessageBox.critical(f"Could not save file: {e}")
 
 
 def main(*args, **kwargs) -> int:
