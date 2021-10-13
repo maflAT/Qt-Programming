@@ -1,8 +1,38 @@
+from typing import Optional
 from PyQt6 import QtGui as qtg, QtCore as qtc, QtWidgets as qtw
+
+
+class SettingsDialog(qtw.QDialog):
+    """Custom settins dialog"""
+
+    def __init__(
+        self,
+        settings: qtc.QSettings,
+        parent: Optional[qtw.QWidget] = None,
+        flags: qtc.Qt.WindowType = qtc.Qt.WindowType.Dialog,
+    ) -> None:
+        super().__init__(parent=parent, flags=flags)
+        self.settings = settings
+        self.show_warnings_cb = qtw.QCheckBox(
+            checked=settings.value("show_warnings", True, bool)
+        )
+        self.accept_btn = qtw.QPushButton("OK", clicked=self.accept)
+        self.cancel_btn = qtw.QPushButton("Cancel", clicked=self.reject)
+        layout = qtw.QFormLayout()
+        layout.addRow(qtw.QLabel("<h1>Application Settings</h1>"))
+        layout.addRow("Show Warnings", self.show_warnings_cb)
+        layout.addRow(self.accept_btn, self.cancel_btn)
+        self.setLayout(layout)
+
+    def accept(self) -> None:
+        self.settings.setValue("show_warnings", self.show_warnings_cb.isChecked())
+        super().accept()
 
 
 class MainWindow(qtw.QMainWindow):
     """Text editor main window"""
+
+    settings = qtc.QSettings("Alan D Moore", "text editor")
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(
@@ -41,6 +71,7 @@ class MainWindow(qtw.QMainWindow):
         open_action.triggered.connect(self.openFile)
         save_action = file_menu.addAction("Save")
         save_action.triggered.connect(self.saveFile)
+        file_menu.addAction("Show settings", self.show_settings)
         quit_action = file_menu.addAction("Quit", self.close)
         edit_menu = menu_bar.addMenu("Edit")
         edit_menu.addAction("Undo", self.textedit.undo)
@@ -50,6 +81,7 @@ class MainWindow(qtw.QMainWindow):
         # explicitly created actions `triggered` signal must be connected manually.
         redo_action.triggered.connect(self.textedit.redo)
         edit_menu.addAction(redo_action)
+        edit_menu.addAction("Change Font", self.set_font)
         help_menu = menu_bar.addMenu("Help")
         help_menu.addAction("About", self.showAboutDialog)
 
@@ -135,10 +167,11 @@ class MainWindow(qtw.QMainWindow):
         splash_screen.addButton(qtw.QMessageBox.StandardButton.Yes)
         splash_screen.addButton(qtw.QMessageBox.StandardButton.Abort)
 
-        response = splash_screen.exec()
-        if response == qtw.QMessageBox.StandardButton.Abort:
-            self.close()
-            sys.exit()
+        if self.settings.value("show_warnings", False, type=bool):
+            response = splash_screen.exec()
+            if response == qtw.QMessageBox.StandardButton.Abort:
+                self.close()
+                sys.exit()
 
     def search_and_replace(self):
         s_text = self.search_text_inp.text()
@@ -183,6 +216,20 @@ class MainWindow(qtw.QMainWindow):
                     fh.write(self.textedit.toPlainText())
             except Exception as e:
                 qtw.QMessageBox.critical(f"Could not save file: {e}")
+
+    def set_font(self):
+        current = self.textedit.currentFont()
+        font, accepted = qtw.QFontDialog.getFont(
+            current,
+            parent=self,
+            options=qtw.QFontDialog.FontDialogOption.MonospacedFonts,
+        )
+        if accepted:
+            self.textedit.setCurrentFont(font)
+
+    def show_settings(self):
+        settings_dialog = SettingsDialog(self.settings, self)
+        settings_dialog.exec()
 
 
 def main(*args, **kwargs) -> int:
