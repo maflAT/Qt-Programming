@@ -1,0 +1,11 @@
+<RCC>
+    <qresource prefix="teams">
+        <file>crimson_sharks.png</file>
+        <file>shadow_hawks.png</file>
+        <file>night_terrors.png</file>
+        <file alias="blue_crew.png">blue_crew2.png</file>
+    </qresource>
+    <qresource prefix="fonts">
+        <file>BRLNSR.TTF</file>
+    </qresource>
+</RCC>
