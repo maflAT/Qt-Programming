@@ -1,6 +1,6 @@
 from pathlib import Path
 from typing import Any
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QModelIndex, Qt
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -10,11 +10,12 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QStackedWidget,
+    QTableView,
     QTableWidget,
     QTableWidgetItem,
     QWidget,
 )
-from PyQt6 import QtSql
+from PyQt6.QtSql import QSqlDatabase, QSqlQuery, QSqlQueryModel
 
 
 class CoffeeForm(QWidget):
@@ -63,7 +64,7 @@ class MainWindow(QMainWindow):
         # configure database #
         ######################
 
-        self.db = QtSql.QSqlDatabase.addDatabase("QSQLITE")
+        self.db = QSqlDatabase.addDatabase("QSQLITE")
         self.db.setDatabaseName(str(Path(__file__).parent.joinpath("coffee.db")))
 
         # establish and check db connection:
@@ -86,9 +87,9 @@ class MainWindow(QMainWindow):
             )
             sys.exit(1)
 
-        # -------------
-        # retrieve data
-        # -------------
+        # -----------------------------
+        # retrieve data for coffee form
+        # -----------------------------
 
         # example data retrieval:
         query = self.db.exec("SELECT count(*) FROM coffees;")
@@ -102,12 +103,111 @@ class MainWindow(QMainWindow):
         while query.next():
             roasts.append(query.value(1))
 
-        # ---------------------------------------
-        # initialize coffee form with roasts data
-        # ---------------------------------------
+        # --------------------------------
+        # initialize coffee form with data
+        # --------------------------------
 
         self.coffee_form = CoffeeForm(roasts=roasts)
         self.stack.addWidget(self.coffee_form)
+
+        # -----------------------------
+        # retrieve data for coffee list
+        # -----------------------------
+
+        coffees = QSqlQueryModel()
+        coffees.setQuery(
+            """--sql
+            SELECT id, coffee_brand, coffee_name AS coffee
+            FROM coffees
+            ORDER BY id;
+            """
+        )
+
+        # --------------------------------
+        # initialize coffee list with data
+        # --------------------------------
+
+        self.coffee_list = QTableView()
+        self.coffee_list.setModel(coffees)
+        self.stack.addWidget(self.coffee_list)
+
+        # --------------------
+        # customize appearance
+        # --------------------
+
+        self.coffee_list.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Interactive
+        )
+        self.coffee_list.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.Stretch
+        )
+        coffees.setHeaderData(1, Qt.Orientation.Horizontal, "Brand")
+        coffees.setHeaderData(2, Qt.Orientation.Horizontal, "Product")
+
+        ##############
+        # Navigation #
+        ##############
+
+        navigation = self.addToolBar("Navigation")
+        navigation.addAction(
+            "Back to list", lambda: self.stack.setCurrentWidget(self.coffee_list)
+        )
+
+        self.coffee_list.doubleClicked.connect(
+            lambda x: self.show_coffee(self.get_id_for_row(x))
+        )
+
+        self.stack.setCurrentWidget(self.coffee_list)
+
+    def show_coffee(self, coffee_id: int):
+        """Retrieve data for coffee_id from the db and pass it to coffee_form."""
+
+        # ------------------------
+        # query db for coffee data
+        # ------------------------
+
+        query1 = QSqlQuery(self.db)  # create query with our db connection
+        query1.prepare("SELECT * FROM coffees WHERE id=:id;")
+        query1.bindValue(":id", coffee_id)  # bind value to variable
+        query1.exec()
+        query1.next()
+        coffee = {
+            "id": query1.value(0),  # access values by column index
+            "coffee_brand": query1.value(1),
+            "coffee_name": query1.value(2),
+            "roast_id": query1.value(3),
+        }
+
+        # -----------------------------
+        # query db for matching reviews
+        # -----------------------------
+
+        query2 = QSqlQuery()  # passing no connection uses the default connection
+        query2.prepare("SELECT * FROM reviews WHERE coffee_id=:id;")
+        query2.bindValue(":id", coffee_id)
+        query2.exec()
+        reviews = []
+        while query2.next():
+            reviews.append(
+                (
+                    query2.value("reviewer"),  # access values by column name
+                    query2.value("review_date"),
+                    query2.value("review"),
+                )
+            )
+
+        # --------------------------------------------
+        # pass data to our form and bring it into view
+        # --------------------------------------------
+
+        self.coffee_form.show_coffee(coffee_data=coffee, reviews=reviews)
+        self.stack.setCurrentWidget(self.coffee_form)
+
+    def get_id_for_row(self, index: QModelIndex) -> int:
+        """Translate table index to coffee_id."""
+        index = index.siblingAtColumn(0)
+        coffee_id: int = self.coffee_list.model().data(index)
+        return coffee_id
 
 
 if __name__ == "__main__":
