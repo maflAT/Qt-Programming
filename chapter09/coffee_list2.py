@@ -1,35 +1,71 @@
 from pathlib import Path
-from typing import Any
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QDate, QModelIndex, Qt
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDataWidgetMapper,
+    QDateEdit,
     QFormLayout,
     QHeaderView,
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QPushButton,
     QStackedWidget,
+    QStyleOptionViewItem,
+    QStyledItemDelegate,
     QTableView,
-    QTableWidget,
-    QTableWidgetItem,
     QWidget,
 )
-from PyQt6.QtSql import QSqlDatabase
+from PyQt6.QtSql import (
+    QSqlDatabase,
+    QSqlRelation,
+    QSqlRelationalDelegate,
+    QSqlRelationalTableModel,
+    QSqlTableModel,
+)
+
+
+class DateDelegate(QStyledItemDelegate):
+    """Custom delegate for editing date values."""
+
+    def createEditor(
+        self,
+        parent: QWidget,
+        option: QStyleOptionViewItem,
+        proxyModelIndex: QModelIndex,
+    ) -> QWidget:
+        return QDateEdit(parent, calendarPopup=True)
 
 
 class CoffeeForm(QWidget):
-    def __init__(self, roasts: list[str]) -> None:
+    def __init__(
+        self, coffees_model: QSqlRelationalTableModel, reviews_model: QSqlTableModel
+    ) -> None:
         super().__init__()
+        self.coffees_model = coffees_model
 
         # create form elements:
         self.coffee_brand = QLineEdit()
         self.coffee_name = QLineEdit()
         self.roast = QComboBox()
-        self.roast.addItems(roasts)
-        self.reviews = QTableWidget(columnCount=3)
+
+        self.new_review = QPushButton("New Review", clicked=self.add_review)
+        self.delete_review = QPushButton("Delete Review", clicked=self.del_review)
+
+        # ------------------------------
+        # configure reviews view / model
+        # ------------------------------
+
+        self.reviews = QTableView()
+        self.reviews.setModel(reviews_model)
+        self.reviews.hideColumn(0)
+        self.reviews.hideColumn(1)
         self.reviews.horizontalHeader().setSectionResizeMode(
-            2, QHeaderView.ResizeMode.Stretch
+            4, QHeaderView.ResizeMode.Stretch
+        )
+        self.reviews.setItemDelegateForColumn(
+            reviews_model.fieldIndex("review_date"), DateDelegate()
         )
 
         # arrange elements:
@@ -37,19 +73,89 @@ class CoffeeForm(QWidget):
         layout.addRow("Brand: ", self.coffee_brand)
         layout.addRow("Name: ", self.coffee_name)
         layout.addRow("Roast: ", self.roast)
-        layout.addRow("Reviews: ", self.reviews)
+        layout.addRow(self.reviews)
+        layout.addRow(self.new_review, self.delete_review)
         self.setLayout(layout)
 
-    def show_coffee(self, coffee_data: dict[str, Any], reviews: list[tuple[str]]):
-        self.coffee_brand.setText(coffee_data.get("coffee_brand"))
-        self.coffee_name.setText(coffee_data.get("coffee_name"))
-        self.roast.setCurrentIndex(coffee_data.get("roast_id"))
-        self.reviews.clear()
-        self.reviews.setHorizontalHeaderLabels(["Reviewer", "Date", "Review"])
-        self.reviews.setRowCount(len(reviews))
-        for i, review in enumerate(reviews):
-            for j, value in enumerate(review):
-                self.reviews.setItem(i, j, QTableWidgetItem(value))
+        ##########################################################################
+        # Use a DataWidgetMapper to map fields from a model to widgets in a form #
+        ##########################################################################
+
+        self.mapper = QDataWidgetMapper(self)
+        self.mapper.setModel(self.coffees_model)
+
+        # -----------------------------------------------------------------------
+        # set a delegate to ensure data is written properly to relational fields:
+        # -----------------------------------------------------------------------
+        self.mapper.setItemDelegate(QSqlRelationalDelegate(self))
+
+        # ----------------------------------
+        # associate widgets to model fields:
+        # ----------------------------------
+        self.mapper.addMapping(
+            self.coffee_brand, self.coffees_model.fieldIndex("coffee_brand")
+        )
+        self.mapper.addMapping(
+            self.coffee_name, self.coffees_model.fieldIndex("coffee_name")
+        )
+        self.mapper.addMapping(self.roast, self.coffees_model.fieldIndex("description"))
+
+        # ---------------------------------------------------------
+        # populate roasts combobox with data from the related table
+        # ---------------------------------------------------------
+
+        roasts_model = self.coffees_model.relationModel(
+            self.coffees_model.fieldIndex("description")
+        )
+        self.roast.setModel(roasts_model)
+        self.roast.setModelColumn(1)
+
+    def show_coffee(self, coffee_index: QModelIndex):
+        """Select record from coffee model by coffee_index."""
+        self.mapper.setCurrentIndex(coffee_index.row())
+
+        # ---------------------
+        # find matching reviews
+        # ---------------------
+
+        # get primary key of current record:
+        id_index = coffee_index.siblingAtColumn(0)
+        self.coffee_id = int(self.coffees_model.data(id_index))
+
+        # construct SELECT query:
+        model: QSqlTableModel = self.reviews.model()
+        model.setFilter(f"coffee_id = {self.coffee_id}")  # condition of WHERE clause
+        model.setSort(3, Qt.SortOrder.DescendingOrder)  # ORDER BY clause
+        model.select()
+
+        self.reviews.resizeRowsToContents()
+        self.reviews.resizeColumnsToContents()
+
+    def add_review(self):
+        """Create a new record in reviews for selected coffee."""
+        model: QSqlTableModel = self.reviews.model()
+        new_row = model.record()
+        defaults = {
+            "coffee_id": self.coffee_id,
+            "review_date": QDate.currentDate(),
+            "reviewer": "",
+            "review": "",
+        }
+        for field, value in defaults.items():
+            index = model.fieldIndex(field)
+            new_row.setValue(index, value)
+
+        inserted = model.insertRecord(-1, new_row)
+        if not inserted:
+            error = model.lastError().text()
+            print(f"Insert Failed: {error}")
+        model.select()
+
+    def del_review(self):
+        """Delete review for selected coffee."""
+        for index in self.reviews.selectedIndexes():
+            self.reviews.model().removeRow(index.row())
+        self.reviews.model().select()
 
 
 class MainWindow(QMainWindow):
@@ -87,75 +193,96 @@ class MainWindow(QMainWindow):
             )
             sys.exit(1)
 
-        # -----------------------------
-        # retrieve data for coffee form
-        # -----------------------------
+        # ------------------------------
+        # create review model from table
+        # ------------------------------
+
+        self.reviews_model = QSqlTableModel()
+        self.reviews_model.setTable("reviews")
+
+        # -----------------------------------------------
+        # create model for coffee list from joined tables
+        # -----------------------------------------------
+
+        self.coffees_model = QSqlRelationalTableModel()
+        self.coffees_model.setTable("coffees")
+
+        # realize relation to roast description withing coffees_model
+        # by joining with roasts table:
+        self.coffees_model.setRelation(
+            self.coffees_model.fieldIndex("roast_id"),
+            QSqlRelation("roasts", "id", "description"),
+        )
+
+        # --------------------------------------------------------------
+        # generate and run a sql select query to refresh the models data
+        # --------------------------------------------------------------
+
+        self.coffees_model.select()
+
+        # -------------------------------
+        # associate coffee list with data
+        # -------------------------------
+
+        self.coffee_list = QTableView()
+        self.coffee_list.setModel(self.coffees_model)
+        self.stack.addWidget(self.coffee_list)
+        self.stack.setCurrentWidget(self.coffee_list)
+
+        # To automatically show a combobox instead of a line edit for editing a foreign
+        # relation field, we can set the QSqlRelationalDelegate.
+        self.coffee_list.setItemDelegate(QSqlRelationalDelegate())
 
         # --------------------------------
         # initialize coffee form with data
         # --------------------------------
 
-        self.coffee_form = CoffeeForm(...)
+        self.coffee_form = CoffeeForm(
+            coffees_model=self.coffees_model, reviews_model=self.reviews_model
+        )
         self.stack.addWidget(self.coffee_form)
-
-        # -----------------------------
-        # retrieve data for coffee list
-        # -----------------------------
-
-        # --------------------------------
-        # initialize coffee list with data
-        # --------------------------------
-
-        self.coffee_list = QTableView()
-        self.coffee_list.setModel(...)
-        self.stack.addWidget(self.coffee_list)
 
         # --------------------
         # customize appearance
         # --------------------
 
         self.coffee_list.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Interactive
-        )
-        self.coffee_list.horizontalHeader().setSectionResizeMode(
-            2, QHeaderView.ResizeMode.Stretch
+            QHeaderView.ResizeMode.ResizeToContents
         )
 
         ##############
         # Navigation #
         ##############
 
-        navigation = self.addToolBar("Navigation")
-        navigation.addAction(
-            "Back to list", lambda: self.stack.setCurrentWidget(self.coffee_list)
-        )
+        toolbar = self.addToolBar("Navigation")
+        toolbar.addAction("Delete Coffee(s)", self.delete_coffee)
+        toolbar.addAction("Add Coffee(s)", self.add_coffee)
+        toolbar.addAction("Back to list", self.show_list)
 
+        # -------------------
+        # connect coffee form
+        # -------------------
+
+        self.coffee_list.doubleClicked.connect(self.coffee_form.show_coffee)
         self.coffee_list.doubleClicked.connect(
-            lambda x: self.show_coffee(self.get_id_for_row(x))
+            lambda x: self.stack.setCurrentWidget(self.coffee_form)
         )
 
+    def delete_coffee(self):
+        """Delete selected item in coffee list from the database."""
+        selected = self.coffee_list.selectedIndexes()
+        for index in selected:
+            self.coffees_model.removeRow(index.row())
+
+    def add_coffee(self):
+        """Add new coffee to the database."""
         self.stack.setCurrentWidget(self.coffee_list)
+        self.coffees_model.insertRows(self.coffees_model.rowCount(), 1)
 
-    def show_coffee(self, coffee_id: int):
-        """Retrieve data for coffee_id from the db and pass it to coffee_form."""
-
-        # ------------------------
-        # query db for coffee data
-        # ------------------------
-
-        # -----------------------------
-        # query db for matching reviews
-        # -----------------------------
-
-        # --------------------------------------------
-        # pass data to our form and bring it into view
-        # --------------------------------------------
-
-        self.coffee_form.show_coffee(coffee_data=..., reviews=...)
-        self.stack.setCurrentWidget(self.coffee_form)
-
-    def get_id_for_row(self, index: ...) -> int:
-        ...
+    def show_list(self):
+        self.coffee_list.resizeColumnsToContents()
+        self.coffee_list.resizeRowsToContents()
+        self.stack.setCurrentWidget(self.coffee_list)
 
 
 if __name__ == "__main__":
