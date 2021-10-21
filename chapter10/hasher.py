@@ -1,6 +1,19 @@
 from typing import Union, Callable
 from PyQt6.QtGui import QAction
-from PyQt6.QtCore import Qt, pyqtBoundSignal, pyqtSignal
+from PyQt6.QtCore import (
+    QCryptographicHash,
+    QDir,
+    QMutex,
+    QMutexLocker,
+    QObject,
+    QRunnable,
+    QThread,
+    QThreadPool,
+    Qt,
+    pyqtBoundSignal,
+    pyqtSignal,
+    pyqtSlot,
+)
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -16,7 +29,68 @@ SIGNAL = Union[pyqtSignal, pyqtBoundSignal]
 SLOT = Union[Callable[..., None], pyqtBoundSignal]
 
 
+class HashManager(QObject):
+    """Receives a list of files to be hashed from the `HashForm` and assigns each file
+    to a `HashRunner`."""
+
+    finished: SIGNAL = pyqtSignal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.pool = QThreadPool.globalInstance()
+
+    @pyqtSlot(str, str, int)
+    def do_hashing(self, source: str, destination: str, threads: int):
+        self.pool.setMaxThreadCount(threads)
+        qdir = QDir(source)
+        for filename in qdir.entryList(QDir.Filter.Files):
+            filepath = qdir.absoluteFilePath(filename)
+            runner = HashRunner(filepath, destination)
+            self.pool.start(runner)
+        self.pool.waitForDone()
+        self.finished.emit()
+
+
+class HashRunner(QRunnable):
+    """Worker thread for hashing a file and writing the result to another file."""
+
+    file_lock = QMutex()
+
+    def __init__(self, infile: str, outfile: str) -> None:
+        super().__init__()
+        self.infile = infile
+        self.outfile = outfile
+        self.hasher = QCryptographicHash(QCryptographicHash.Algorithm.Md5)
+        self.setAutoDelete(True)
+
+    def run(self) -> None:
+        """This is our main method. It is called by `QThreadPool.start()`."""
+        print(f"hashing {self.infile}...")
+        self.hasher.reset()
+        with open(self.infile, "rb") as fh:
+            self.hasher.addData(fh.read())
+        hash_string = bytes(self.hasher.result().toHex()).decode("utf-8")
+
+        # ----------------------------------------
+        # traditional approach using try / finally
+        # ----------------------------------------
+        # try:
+        #     self.file_lock.lock()
+        #     with open(self.outfile, "a", encoding="utf-8") as out:
+        #         out.write(f"{self.infile}\t{hash_string}\n")
+        # finally:
+        #     self.file_lock.unlock()
+
+        # -----------------------------------------------
+        # alternative, using QMutexLocker context manager
+        # -----------------------------------------------
+        with QMutexLocker(self.file_lock):
+            with open(self.outfile, "a", encoding="utf-8") as out:
+                out.write(f"{self.infile}\t{hash_string}\n")
+
+
 class HashForm(QWidget):
+    """Front end for selecting a directory and configuring settings of the hash runner."""
 
     submitted: SIGNAL = pyqtSignal(str, str, int)
 
@@ -66,7 +140,20 @@ class HashForm(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self.setCentralWidget(HashForm())
+        form = HashForm()
+        self.setCentralWidget(form)
+
+        self.manager = HashManager()
+        self.manager_thread = QThread()
+        self.manager.moveToThread(self.manager_thread)
+        self.manager_thread.start()
+        form.submitted.connect(self.manager.do_hashing)
+        form.submitted.connect(
+            lambda x, y, z: self.statusBar().showMessage(
+                f"Processing files in {x} into {y} with {z} threads."
+            )
+        )
+        self.manager.finished.connect(lambda: self.statusBar().showMessage("Finished"))
 
 
 if __name__ == "__main__":
