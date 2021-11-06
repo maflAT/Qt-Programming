@@ -15,6 +15,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import (
     QWebEnginePage,
     QWebEngineProfile,
+    QWebEngineScript,
     QWebEngineSettings,
 )
 
@@ -62,6 +63,26 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, history_dock)
         self.history_list = QListWidget()
         history_dock.setWidget(self.history_list)
+        self.history_list.itemDoubleClicked.connect(self.navigate_history)
+
+        ###############
+        # Search Dock #
+        ###############
+
+        find_dock = QDockWidget("Search")
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, find_dock)
+        self.find_text = QLineEdit()
+        find_dock.setWidget(self.find_text)
+        self.find_text.textChanged.connect(self.text_search)
+
+        # import javascript code to highlight search terms
+        with open("chapter16/finder.js", "r") as fh:
+            self.finder_js = fh.read()
+
+        # register script with function definition to run on page load:
+        self.finder_script = QWebEngineScript()
+        self.finder_script.setSourceCode(self.finder_js)
+        self.finder_script.setWorldId(QWebEngineScript.ScriptWorldId.MainWorld)
 
         # ---------------
         # connect actions
@@ -74,7 +95,6 @@ class MainWindow(QMainWindow):
         self.urlbar.returnPressed.connect(self.on_go)
         self.new.clicked.connect(self.add_tab)
         self.tabs.currentChanged.connect(self.update_history)
-        self.history_list.itemDoubleClicked.connect(self.navigate_history)
 
         # -------------------
         # Global User Profile
@@ -107,6 +127,9 @@ class MainWindow(QMainWindow):
         # assign global profile
         # ---------------------
         page = QWebEnginePage(self.profile)
+
+        # register js functions for search to run on page load:
+        page.scripts().insert(self.finder_script)
         webview.setPage(page)
 
         # set default content for new tab:
@@ -145,6 +168,20 @@ class MainWindow(QMainWindow):
         qurl = item.data(Qt.ItemDataRole.DisplayRole)
         if self.tabs.currentWidget():
             self.tabs.currentWidget().load(qurl)
+
+    def text_search(self, term: str):
+        term = term.replace('"', "")
+        page: QWebEnginePage = self.tabs.currentWidget().page()
+        js = f'highlight_term("{term}");'
+        page.runJavaScript(
+            js, QWebEngineScript.ScriptWorldId.MainWorld, self.match_count
+        )
+
+    def match_count(self, count: int):
+        if count:
+            self.statusBar().showMessage(f"{count} matches ")
+        else:
+            self.statusBar().clearMessage()
 
 
 if __name__ == "__main__":
